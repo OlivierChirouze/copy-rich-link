@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -29,6 +29,25 @@
         const baseURL = window.location.origin;
         const shortURL = `${baseURL}/browse/${issueKey}`;
         return { issueKey, jiraEmoji, issueTitle, shortURL };
+    }
+
+    function injectTitleLinkButtons(pageTitle) {
+        document.querySelectorAll('h1[id],h2[id],h3[id],h4[id]').forEach(element => {
+            const btnId = 'copyLinkBtn_' + element.id;
+            
+            if (element.querySelector('#' + 'copyLinkBtn_' + CSS.escape(element.id))) {
+                console.log(`✅ Title button already exists (Confluence) for '${element.id}'`);
+                
+                return;
+            }
+            
+            const id = element.id;
+            const text = element.textContent.trim();
+            const urlWithFragment = window.location.origin + window.location.pathname + window.location.search + '#' + id;
+            const linkTitle = `${pageTitle} > ${text}`;
+
+            injectButton("📄", linkTitle, urlWithFragment, element, btnId);
+        });
     }
 
     function tryInjectButton() {
@@ -107,16 +126,20 @@
                 return;
             }
 
-            if (document.querySelector('#copyWithTitleBtnConfluence')) {
-                console.log("✅ Button already exists (Confluence)");
-                return;
-            }
-
-            const pageTitle = titleEl.textContent.trim();
+            let buttonId = 'copyLinkBtn_' + toInjectEl.id;
+            
+            const pageTitle = titleEl.firstChild.textContent.trim();
             const pageURL = window.location.href;
 
-            injectButton("📄", pageTitle, pageURL, toInjectEl, 'copyWithTitleBtnConfluence');
+            if (document.querySelector('#' + buttonId)) {
+                console.log("✅ Title button already exists (Confluence)");
+            } else {
+                injectButton("📄", pageTitle, pageURL, toInjectEl, buttonId);
+            }
+
+            injectTitleLinkButtons(pageTitle);
         }
+
     }
 
     function injectButton(emoji, title, url, targetEl, buttonId) {

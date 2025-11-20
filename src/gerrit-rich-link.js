@@ -8,8 +8,7 @@
 // ==/UserScript==
 
 (
-    function ()
-    {
+    function () {
         'use strict';
 
         console.log(
@@ -21,8 +20,7 @@
         const throttleDelay = 500;
         const bntLabel = 'Copy rich link with commit title';
 
-        function getGerritInfo ()
-        {
+        function getGerritInfo() {
             let commitTitleEl = document.querySelector(
                 '.changeSubject, h2.changeSubject, h2[data-change-subject]'
             );
@@ -34,14 +32,12 @@
                 console.log('not found');
             }
 
-            if (!commitTitleEl)
-            {
+            if (!commitTitleEl) {
                 commitTitleEl = document.querySelector(
                     'h2, .commit-message'
                 );
             }
-            if (!commitTitleEl)
-            {
+            if (!commitTitleEl) {
                 const h2s = Array.from(document.querySelectorAll('h2'));
                 for (const h2 of h2s) {
                     if (h2.offsetParent !== null && h2.textContent.trim().length > 0) {
@@ -69,33 +65,29 @@
             }
             const commitId = document.title.replace(/(.*) \((.*)\) · Gerrit Code Review/, "$2");
             const shortURL = window.location.href;
-            return { commitId, commitTitle, shortURL, commitTitleEl };
+            return {commitId, commitTitle, shortURL, commitTitleEl};
         }
 
-        function tryInjectButton ()
-        {
+        function tryInjectButton() {
             const now = Date.now();
             if (now - lastRun < throttleDelay) return;
             lastRun = now;
 
             // Only run on Gerrit change view
             const isGerritChangeView = /\/c\/.+\/\+\/\d+/.test(window.location.pathname);
-            if (!isGerritChangeView)
-            {
+            if (!isGerritChangeView) {
                 return;
             }
 
-            const { commitId, commitTitle, shortURL, commitTitleEl } = getGerritInfo();
-            if (!commitTitleEl || !commitTitle)
-            {
+            const {commitId, commitTitle, shortURL, commitTitleEl} = getGerritInfo();
+            if (!commitTitleEl || !commitTitle) {
                 console.log(
                     "⏳ Waiting for Gerrit commit title..."
                 );
                 return;
             }
 
-            if (document.querySelector('#copyWithTitleBtnGerrit'))
-            {
+            if (document.querySelector('#copyWithTitleBtnGerrit')) {
                 console.log(
                     "✅ Button already exists (Gerrit)"
                 );
@@ -107,10 +99,9 @@
             );
         }
 
-        function injectButton (
+        function injectButton(
             emoji, commitId, title, url, targetEl, buttonId
-        )
-        {
+        ) {
             const htmlLink = `<a href="${url}">${commitId} - ${title}</a>`;
             const plainText = `${commitId} - ${title} ${url}`;
 
@@ -140,28 +131,24 @@
             newBtn.style.color = '#42526E';
             newBtn.style.transition = 'color 0.2s ease';
 
-            newBtn.onmouseenter = () =>
-            {
+            newBtn.onmouseenter = () => {
                 newBtn.style.color = '#0052CC';
             };
-            newBtn.onmouseleave = () =>
-            {
+            newBtn.onmouseleave = () => {
                 newBtn.style.color = '#42526E';
             };
 
-            newBtn.onclick = async () =>
-            {
-                try
-                {
+            newBtn.onclick = async () => {
+                try {
                     await navigator.clipboard.write(
                         [
                             new ClipboardItem(
                                 {
                                     'text/html': new Blob(
-                                        [htmlLink], { type: 'text/html' }
+                                        [htmlLink], {type: 'text/html'}
                                     ),
                                     'text/plain': new Blob(
-                                        [plainText], { type: 'text/plain' }
+                                        [plainText], {type: 'text/plain'}
                                     )
                                 }
                             )
@@ -174,9 +161,7 @@
                     setTimeout(
                         () => newBtn.innerText = '🔗', 1500
                     );
-                }
-                catch (err)
-                {
+                } catch (err) {
                     console.error(
                         "❌ Clipboard error:", err
                     );
@@ -192,35 +177,29 @@
         }
 
         observer = new MutationObserver(
-            () =>
-            {
+            () => {
                 tryInjectButton();
             }
         );
 
         observer.observe(
-            document.body, { childList: true, subtree: true }
+            document.body, {childList: true, subtree: true}
         );
 
         document.addEventListener(
-            'keydown', (e) =>
-            {
+            'keydown', (e) => {
                 if (
                     e.ctrlKey && e.shiftKey && e.code === 'KeyC'
-                )
-                {
+                ) {
                     const copyLinkBtn = document.querySelector(
-                        '[aria-label="'+ bntLabel +'"]'
+                        '[aria-label="' + bntLabel + '"]'
                     );
-                    if (copyLinkBtn)
-                    {
+                    if (copyLinkBtn) {
                         copyLinkBtn.click();
                         console.log(
                             "🔗 Copy link button triggered by keyboard"
                         );
-                    }
-                    else
-                    {
+                    } else {
                         console.warn(
                             "⚠️ Copy link button not found"
                         );

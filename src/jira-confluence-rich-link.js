@@ -6,6 +6,7 @@
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
 // @grant        none
+// @updateUrl    https://raw.githubusercontent.com/OlivierChirouze/copy-rich-link/refs/heads/main/src/jira-confluence-rich-link.js
 // ==/UserScript==
 
 (function() {

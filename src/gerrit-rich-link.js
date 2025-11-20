@@ -6,6 +6,7 @@
 // @author       Olivier Chirouze
 // @match        https://review.*.in/*
 // @grant        none
+// @updateUrl    https://raw.githubusercontent.com/OlivierChirouze/copy-rich-link/refs/heads/main/src/gerrit-rich-link.js
 // ==/UserScript==
 
 (

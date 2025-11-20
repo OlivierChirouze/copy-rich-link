@@ -4,6 +4,7 @@
 // @version      1.1
 // @description  Adds icon-only button to copy rich HTML link with commit title (Gerrit change view) using short URL format, compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
+// @match        https://review.*.in/*
 // @grant        none
 // ==/UserScript==
 

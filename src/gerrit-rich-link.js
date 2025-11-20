@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gerrit Copy Rich Link with Commit Title
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Adds icon-only button to copy rich HTML link with commit title (Gerrit change view) using short URL format, compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
 // @grant        none
@@ -26,6 +26,14 @@
             let commitTitleEl = document.querySelector(
                 '.changeSubject, h2.changeSubject, h2[data-change-subject]'
             );
+
+
+            try {
+                commitTitleEl = document.querySelector("#pg-app").shadowRoot.querySelector('#app-element').shadowRoot.querySelector("gr-change-view").shadowRoot.querySelector('.headerSubject').textContent.trim();
+            } catch {
+                console.log('not found');
+            }
+
             if (!commitTitleEl)
             {
                 commitTitleEl = document.querySelector(

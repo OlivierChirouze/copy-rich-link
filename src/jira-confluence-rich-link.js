@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -113,13 +113,24 @@
             let toInjectEl;
 
             const liveEditDiv = document.querySelector('[data-testid="editor-title-with-buttons-div"]');
+            
+            let isDatabase = false;
 
             if (liveEditDiv) {
                 titleEl = liveEditDiv.querySelector('#content-title-id');
                 toInjectEl = liveEditDiv;
             } else {
                 titleEl = document.querySelector('h1[data-test-id="page-title"], header h1, h1[aria-level="1"], h1');
-                toInjectEl = titleEl;
+                
+                if (!titleEl) {
+                    const divs = document.querySelectorAll('[data-testid=inline-rename-breadcrumb-title] div');
+                    titleEl = divs?.[divs?.length - 1]; // last
+                    isDatabase = true;
+                }
+
+                if (titleEl) {
+                    toInjectEl = titleEl;
+                }
             }
 
             if (!titleEl) {
@@ -135,7 +146,7 @@
             if (document.querySelector('#' + buttonId)) {
                 console.log("✅ Title button already exists (Confluence)");
             } else {
-                injectButton("📄", pageTitle, pageURL, toInjectEl, buttonId);
+                injectButton(isDatabase ? "📈" : "📄", pageTitle, pageURL, toInjectEl, buttonId);
             }
 
             injectTitleLinkButtons(pageTitle);

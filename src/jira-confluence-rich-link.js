@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -155,7 +155,10 @@
     }
 
     function injectButton(emoji, title, url, targetEl, buttonId) {
-        const htmlLink = `<a href="${url}">${emoji} ${title}</a>`;
+        // this is a fake dot! to prevent Slack to convert it to a link inside the link (see https://www.onevinn.com/blog/prevent-clickable-links-with-a-fake-dot)
+        // Particularly useful for "ASP.net" string 🙄
+        const formattedTitle = title.replace(/(\w)\.(\w)/,'$1․$2');
+        const htmlLink = `<a href="${url}">${emoji} ${formattedTitle}</a>`;
         const plainText = `${emoji}: ${title} ${url}`;
 
         console.log("htmlLink", htmlLink);

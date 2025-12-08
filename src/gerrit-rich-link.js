@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gerrit Copy Rich Link with Commit Title
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Adds icon-only button to copy rich HTML link with commit title (Gerrit change view) using short URL format, compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
 // @match        https://review.*.in/*
@@ -104,7 +104,10 @@
         function injectButton(
             emoji, commitId, title, url, targetEl, buttonId
         ) {
-            const htmlLink = `<a href="${url}">${commitId} - ${title}</a>`;
+            // this is a fake dot! to prevent Slack to convert it to a link inside the link (see https://www.onevinn.com/blog/prevent-clickable-links-with-a-fake-dot)
+            // Particularly useful for "ASP.net" string 🙄
+            const formattedTitle = title.replace(/(\w)\.(\w)/,'$1․$2');
+            const htmlLink = `<a href="${url}">${commitId} - ${formattedTitle}</a>`;
             const plainText = `${commitId} - ${title} ${url}`;
 
             console.log(

@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @updateUrl    https://raw.githubusercontent.com/OlivierChirouze/copy-rich-link/refs/heads/main/src/jira-confluence-rich-link.js
 // ==/UserScript==
 
@@ -19,13 +21,190 @@
     const throttleDelay = 500;
     const bntLabel = 'Copy rich link with title';
 
+    // Default emoji mappings
+    const defaultEmojiMappings = [
+        { prefix: 'TECH-', emoji: '🎯' },
+        { prefix: 'TECHNO-', emoji: '🎯' },
+        { prefix: 'PRODUCT-', emoji: '🎯' },
+        { prefix: '', emoji: '✅' } // Default fallback
+    ];
+
+    // Get emoji mappings from storage or use defaults
+    let emojiMappings = GM_getValue('emojiMappings', defaultEmojiMappings);
+
+    // Register menu command to configure emoji mappings
+    GM_registerMenuCommand('Configure Jira Emoji Mappings', showEmojiConfigDialog);
+
+    function showEmojiConfigDialog() {
+        // Create modal container
+        const modal = document.createElement('div');
+        modal.style.position = 'fixed';
+        modal.style.top = '0';
+        modal.style.left = '0';
+        modal.style.width = '100%';
+        modal.style.height = '100%';
+        modal.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        modal.style.display = 'flex';
+        modal.style.justifyContent = 'center';
+        modal.style.alignItems = 'center';
+        modal.style.zIndex = '10000';
+
+        // Create modal content
+        const content = document.createElement('div');
+        content.style.backgroundColor = 'white';
+        content.style.padding = '20px';
+        content.style.borderRadius = '5px';
+        content.style.width = '500px';
+        content.style.maxHeight = '80%';
+        content.style.overflowY = 'auto';
+
+        // Create title
+        const title = document.createElement('h2');
+        title.textContent = 'Configure Jira Emoji Mappings';
+        title.style.marginTop = '0';
+        content.appendChild(title);
+
+        // Create description
+        const description = document.createElement('p');
+        description.textContent = 'Configure which emoji to use for different Jira project prefixes. The first matching prefix will be used. Empty prefix is the default fallback.';
+        content.appendChild(description);
+
+        // Create mappings container
+        const mappingsContainer = document.createElement('div');
+        mappingsContainer.id = 'mappings-container';
+        content.appendChild(mappingsContainer);
+
+        // Function to render all mappings
+        function renderMappings() {
+            mappingsContainer.innerHTML = '';
+            
+            emojiMappings.forEach((mapping, index) => {
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.marginBottom = '10px';
+                row.style.alignItems = 'center';
+                
+                const prefixInput = document.createElement('input');
+                prefixInput.type = 'text';
+                prefixInput.value = mapping.prefix;
+                prefixInput.placeholder = 'Project prefix (e.g. TECH-)';
+                prefixInput.style.flex = '1';
+                prefixInput.style.marginRight = '10px';
+                prefixInput.style.padding = '5px';
+                prefixInput.addEventListener('change', (e) => {
+                    emojiMappings[index].prefix = e.target.value;
+                });
+                
+                const emojiInput = document.createElement('input');
+                emojiInput.type = 'text';
+                emojiInput.value = mapping.emoji;
+                emojiInput.placeholder = 'Emoji';
+                emojiInput.style.width = '50px';
+                emojiInput.style.marginRight = '10px';
+                emojiInput.style.padding = '5px';
+                emojiInput.addEventListener('change', (e) => {
+                    emojiMappings[index].emoji = e.target.value;
+                });
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = '🗑️';
+                deleteBtn.style.cursor = 'pointer';
+                deleteBtn.style.padding = '5px 10px';
+                deleteBtn.addEventListener('click', () => {
+                    emojiMappings.splice(index, 1);
+                    renderMappings();
+                });
+                
+                row.appendChild(prefixInput);
+                row.appendChild(emojiInput);
+                row.appendChild(deleteBtn);
+                mappingsContainer.appendChild(row);
+            });
+        }
+        
+        // Initial render
+        renderMappings();
+        
+        // Add new mapping button
+        const addBtn = document.createElement('button');
+        addBtn.textContent = 'Add New Mapping';
+        addBtn.style.marginTop = '10px';
+        addBtn.style.padding = '5px 10px';
+        addBtn.addEventListener('click', () => {
+            emojiMappings.push({ prefix: '', emoji: '✅' });
+            renderMappings();
+        });
+        content.appendChild(addBtn);
+        
+        // Create buttons container
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.style.display = 'flex';
+        buttonsContainer.style.justifyContent = 'space-between';
+        buttonsContainer.style.marginTop = '20px';
+        
+        // Reset button
+        const resetBtn = document.createElement('button');
+        resetBtn.textContent = 'Reset to Defaults';
+        resetBtn.style.padding = '8px 15px';
+        resetBtn.addEventListener('click', () => {
+            emojiMappings = JSON.parse(JSON.stringify(defaultEmojiMappings));
+            renderMappings();
+        });
+        
+        // Save button
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Save';
+        saveBtn.style.padding = '8px 15px';
+        saveBtn.style.backgroundColor = '#0052CC';
+        saveBtn.style.color = 'white';
+        saveBtn.style.border = 'none';
+        saveBtn.style.borderRadius = '3px';
+        saveBtn.style.cursor = 'pointer';
+        saveBtn.addEventListener('click', () => {
+            GM_setValue('emojiMappings', emojiMappings);
+            modal.remove();
+        });
+        
+        // Cancel button
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.padding = '8px 15px';
+        cancelBtn.addEventListener('click', () => {
+            modal.remove();
+        });
+        
+        buttonsContainer.appendChild(resetBtn);
+        
+        const rightButtons = document.createElement('div');
+        rightButtons.appendChild(cancelBtn);
+        rightButtons.appendChild(document.createTextNode(' '));
+        rightButtons.appendChild(saveBtn);
+        buttonsContainer.appendChild(rightButtons);
+        
+        content.appendChild(buttonsContainer);
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+    }
+
+    function getJiraEmoji(issueKey) {
+        if (!issueKey) return '✅';
+        
+        for (const mapping of emojiMappings) {
+            if (issueKey.startsWith(mapping.prefix)) {
+                return mapping.emoji;
+            }
+        }
+        
+        return '✅'; // Default fallback
+    }
+
     function getJiraInfo(issueKeyEl, issueTitleEl) {
         let issueKey = issueKeyEl?.textContent?.trim();
         if (!issueKey) {
             const match = window.location.href.match(/browse\/([A-Z]+-\d+)/);
             issueKey = match ? match[1] : null;
         }
-        const jiraEmoji = /^TECH-|^PRODUCT-/.test(issueKey) ? "🎯" : "✅";
+        const jiraEmoji = getJiraEmoji(issueKey);
         const issueTitle = issueTitleEl?.textContent?.trim() ?? "";
         const baseURL = window.location.origin;
         const shortURL = `${baseURL}/browse/${issueKey}`;

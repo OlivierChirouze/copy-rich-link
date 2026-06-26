@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.4
-// @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats.
+// @version      1.5
+// @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats. Also adds a "Copy link with title" entry to Jira's work-item right-click context menu.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
 // @grant        GM_getValue
@@ -20,6 +20,8 @@
     let lastRun = 0;
     const throttleDelay = 500;
     const bntLabel = 'Copy rich link with title';
+    const contextMenuItemLabel = 'Copy link with title';
+    const CONTEXT_ITEM_CLASS = 'copyRichLinkContextItem';
 
     // Default emoji mappings
     const defaultEmojiMappings = [
@@ -77,13 +79,13 @@
         // Function to render all mappings
         function renderMappings() {
             mappingsContainer.innerHTML = '';
-            
+
             emojiMappings.forEach((mapping, index) => {
                 const row = document.createElement('div');
                 row.style.display = 'flex';
                 row.style.marginBottom = '10px';
                 row.style.alignItems = 'center';
-                
+
                 const prefixInput = document.createElement('input');
                 prefixInput.type = 'text';
                 prefixInput.value = mapping.prefix;
@@ -94,7 +96,7 @@
                 prefixInput.addEventListener('change', (e) => {
                     emojiMappings[index].prefix = e.target.value;
                 });
-                
+
                 const emojiInput = document.createElement('input');
                 emojiInput.type = 'text';
                 emojiInput.value = mapping.emoji;
@@ -105,7 +107,7 @@
                 emojiInput.addEventListener('change', (e) => {
                     emojiMappings[index].emoji = e.target.value;
                 });
-                
+
                 const deleteBtn = document.createElement('button');
                 deleteBtn.textContent = '🗑️';
                 deleteBtn.style.cursor = 'pointer';
@@ -114,17 +116,17 @@
                     emojiMappings.splice(index, 1);
                     renderMappings();
                 });
-                
+
                 row.appendChild(prefixInput);
                 row.appendChild(emojiInput);
                 row.appendChild(deleteBtn);
                 mappingsContainer.appendChild(row);
             });
         }
-        
+
         // Initial render
         renderMappings();
-        
+
         // Add new mapping button
         const addBtn = document.createElement('button');
         addBtn.textContent = 'Add New Mapping';
@@ -135,13 +137,13 @@
             renderMappings();
         });
         content.appendChild(addBtn);
-        
+
         // Create buttons container
         const buttonsContainer = document.createElement('div');
         buttonsContainer.style.display = 'flex';
         buttonsContainer.style.justifyContent = 'space-between';
         buttonsContainer.style.marginTop = '20px';
-        
+
         // Reset button
         const resetBtn = document.createElement('button');
         resetBtn.textContent = 'Reset to Defaults';
@@ -150,7 +152,7 @@
             emojiMappings = JSON.parse(JSON.stringify(defaultEmojiMappings));
             renderMappings();
         });
-        
+
         // Save button
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Save';
@@ -164,7 +166,7 @@
             GM_setValue('emojiMappings', emojiMappings);
             modal.remove();
         });
-        
+
         // Cancel button
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = 'Cancel';
@@ -172,15 +174,15 @@
         cancelBtn.addEventListener('click', () => {
             modal.remove();
         });
-        
+
         buttonsContainer.appendChild(resetBtn);
-        
+
         const rightButtons = document.createElement('div');
         rightButtons.appendChild(cancelBtn);
         rightButtons.appendChild(document.createTextNode(' '));
         rightButtons.appendChild(saveBtn);
         buttonsContainer.appendChild(rightButtons);
-        
+
         content.appendChild(buttonsContainer);
         modal.appendChild(content);
         document.body.appendChild(modal);
@@ -188,13 +190,13 @@
 
     function getJiraEmoji(issueKey) {
         if (!issueKey) return '✅';
-        
+
         for (const mapping of emojiMappings) {
             if (issueKey.startsWith(mapping.prefix)) {
                 return mapping.emoji;
             }
         }
-        
+
         return '✅'; // Default fallback
     }
 
@@ -214,13 +216,13 @@
     function injectTitleLinkButtons(pageTitle) {
         document.querySelectorAll('h1[id],h2[id],h3[id],h4[id]').forEach(element => {
             const btnId = 'copyLinkBtn_' + element.id;
-            
+
             if (element.querySelector('#' + 'copyLinkBtn_' + CSS.escape(element.id))) {
                 console.log(`✅ Title button already exists (Confluence) for '${element.id}'`);
-                
+
                 return;
             }
-            
+
             const id = element.id;
             const text = element.textContent.trim();
             const urlWithFragment = window.location.origin + window.location.pathname + window.location.search + '#' + id;
@@ -292,7 +294,7 @@
             let toInjectEl;
 
             const liveEditDiv = document.querySelector('[data-testid="editor-title-with-buttons-div"]');
-            
+
             let isDatabase = false;
 
             if (liveEditDiv) {
@@ -300,7 +302,7 @@
                 toInjectEl = liveEditDiv;
             } else {
                 titleEl = document.querySelector('h1[data-test-id="page-title"], header h1, h1[aria-level="1"], h1');
-                
+
                 if (!titleEl) {
                     const divs = document.querySelectorAll('[data-testid=inline-rename-breadcrumb-title] div');
                     titleEl = divs?.[divs?.length - 1]; // last
@@ -318,7 +320,7 @@
             }
 
             let buttonId = 'copyLinkBtn_' + toInjectEl.id;
-            
+
             const pageTitle = titleEl.firstChild.textContent.trim();
             const pageURL = window.location.href;
 
@@ -333,16 +335,26 @@
 
     }
 
-    function injectButton(emoji, title, url, targetEl, buttonId) {
+    // Shared clipboard logic used by both the injected buttons and the context menu item.
+    async function copyRichLink(emoji, title, url) {
         // this is a fake dot! to prevent Slack to convert it to a link inside the link (see https://www.onevinn.com/blog/prevent-clickable-links-with-a-fake-dot)
         // Particularly useful for "ASP.net" string 🙄
-        const formattedTitle = title.replace(/(\w)\.(\w)/,'$1․$2');
+        const formattedTitle = title.replace(/(\w)\.(\w)/, '$1․$2');
         const htmlLink = `<a href="${url}">${emoji} ${formattedTitle}</a>`;
         const plainText = `${emoji}: ${title} ${url}`;
 
         console.log("htmlLink", htmlLink);
         console.log("plainText", plainText);
 
+        await navigator.clipboard.write([
+            new ClipboardItem({
+                'text/html': new Blob([htmlLink], { type: 'text/html' }),
+                'text/plain': new Blob([plainText], { type: 'text/plain' })
+            })
+        ]);
+    }
+
+    function injectButton(emoji, title, url, targetEl, buttonId) {
         const newBtn = document.createElement('button');
         newBtn.id = buttonId;
         newBtn.innerText = '🔗';
@@ -363,12 +375,7 @@
 
         newBtn.onclick = async () => {
             try {
-                await navigator.clipboard.write([
-                    new ClipboardItem({
-                        'text/html': new Blob([htmlLink], { type: 'text/html' }),
-                        'text/plain': new Blob([plainText], { type: 'text/plain' })
-                    })
-                ]);
+                await copyRichLink(emoji, title, url);
                 console.log("✅ Rich link copied");
                 newBtn.innerText = emoji;
                 setTimeout(() => newBtn.innerText = '🔗', 1500);
@@ -380,6 +387,155 @@
         targetEl.appendChild(newBtn);
         console.log("🎯 Button injected:", buttonId);
     }
+
+    // ----------------------------------------------------------------------
+    // Jira work-item right-click context menu integration
+    // ----------------------------------------------------------------------
+
+    // Find the row/card that owns the right-clicked element.
+    function findIssueRow(startEl) {
+        if (!startEl || !startEl.closest) return null;
+
+        // Common containers for Jira work-item rows/cards across backlog, list and board.
+        const row = startEl.closest('[data-rbd-draggable-id], [role="row"], tr, li, [data-testid*="row"], [data-testid*="card"]');
+        if (row && row.querySelector('a[href*="/browse/"]')) return row;
+
+        // Fallback: nearest ancestor that contains a browse link.
+        let el = startEl;
+        while (el && el !== document.body) {
+            if (el.querySelector && el.querySelector('a[href*="/browse/"]')) return el;
+            el = el.parentElement;
+        }
+        return row || null;
+    }
+
+    // Extract { issueKey, jiraEmoji, issueTitle, shortURL } from a row, or null.
+    function getIssueInfoFromRow(rowEl) {
+        if (!rowEl || !rowEl.querySelectorAll) return null;
+
+        let issueKey = null;
+        let issueTitle = "";
+
+        const links = Array.from(rowEl.querySelectorAll('a[href*="/browse/"]'));
+        if (links.length) {
+            // Prefer the link carrying the most text (usually the summary link,
+            // not an epic/parent chip), and derive the key from its own href.
+            links.sort((a, b) => b.textContent.trim().length - a.textContent.trim().length);
+            const best = links[0];
+            const m = best.getAttribute('href').match(/\/browse\/([A-Z][A-Z0-9]+-\d+)/);
+            if (m) issueKey = m[1];
+            issueTitle = best.textContent.trim();
+        }
+
+        if (!issueKey) {
+            const m = rowEl.textContent.match(/\b[A-Z][A-Z0-9]+-\d+\b/);
+            if (m) issueKey = m[0];
+        }
+
+        if (!issueKey) return null;
+
+        if (!issueTitle) {
+            const summaryEl = rowEl.querySelector('[data-testid*="summary"]');
+            if (summaryEl) issueTitle = summaryEl.textContent.trim();
+        }
+
+        // Strip the issue key out of the title if it leaked in, and collapse whitespace.
+        issueTitle = issueTitle.split(issueKey).join('').replace(/\s+/g, ' ').trim();
+
+        const jiraEmoji = getJiraEmoji(issueKey);
+        const shortURL = `${window.location.origin}/browse/${issueKey}`;
+        return { issueKey, jiraEmoji, issueTitle, shortURL };
+    }
+
+    function pressEscape() {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true
+        }));
+    }
+
+    // Find the native "Copy link" menu item in an open context menu.
+    function findNativeCopyLinkItem() {
+        const candidates = document.querySelectorAll('[role="menuitem"]');
+        for (const el of candidates) {
+            if (el.textContent.trim() === 'Copy link') return el;
+        }
+        return null;
+    }
+
+    // Replace the first text node (or leaf element) reading `oldText` with `newText`.
+    function relabelItem(clone, oldText, newText) {
+        const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT, null);
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.textContent.trim() === oldText) {
+                node.textContent = node.textContent.replace(oldText, newText);
+                return;
+            }
+        }
+        for (const el of clone.querySelectorAll('*')) {
+            if (el.children.length === 0 && el.textContent.trim() === oldText) {
+                el.textContent = newText;
+                return;
+            }
+        }
+        clone.textContent = newText;
+    }
+
+    // Inject our item right after the native "Copy link" item. Returns true once
+    // the menu has been found (and our item exists), false while still waiting.
+    function injectContextMenuItem(issueInfo) {
+        const anchor = findNativeCopyLinkItem();
+        if (!anchor || !anchor.parentElement) return false;
+
+        const menu = anchor.closest('[role="menu"]') || anchor.parentElement;
+        if (menu.querySelector('.' + CONTEXT_ITEM_CLASS)) return true; // already injected
+
+        // Clone the native item so styling/markup matches exactly. The clone has no
+        // React fiber, so Jira's original "Copy link" handler will NOT fire on it.
+        const clone = anchor.cloneNode(true);
+        clone.classList.add(CONTEXT_ITEM_CLASS);
+        clone.removeAttribute('id');
+        clone.removeAttribute('data-testid');
+        clone.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+        clone.querySelectorAll('[data-testid]').forEach(n => n.removeAttribute('data-testid'));
+
+        relabelItem(clone, 'Copy link', contextMenuItemLabel);
+
+        clone.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                await copyRichLink(issueInfo.jiraEmoji, issueInfo.issueTitle, issueInfo.shortURL);
+                console.log("✅ Rich link copied (context menu) for", issueInfo.issueKey);
+            } catch (err) {
+                console.error("❌ Clipboard error:", err);
+            }
+            pressEscape();
+        }, true);
+
+        anchor.parentElement.insertBefore(clone, anchor.nextSibling);
+        console.log("🎯 Context menu item injected for", issueInfo.issueKey);
+        return true;
+    }
+
+    document.addEventListener('contextmenu', (e) => {
+        const info = getIssueInfoFromRow(findIssueRow(e.target));
+        if (!info || !info.issueKey) {
+            console.log("ℹ️ No Jira issue detected at right-click target");
+            return;
+        }
+        console.log("🖱️ Right-clicked Jira issue:", info.issueKey);
+
+        // The menu renders just after the contextmenu event; poll briefly for it.
+        let attempts = 0;
+        const maxAttempts = 20;
+        const timer = setInterval(() => {
+            attempts++;
+            if (injectContextMenuItem(info) || attempts >= maxAttempts) {
+                clearInterval(timer);
+            }
+        }, 50);
+    }, true);
 
     observer = new MutationObserver(() => {
         tryInjectButton();

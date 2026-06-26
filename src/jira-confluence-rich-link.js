@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.6
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats. Also adds a "Copy link with title" entry to Jira's work-item right-click context menu.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -453,11 +453,14 @@
         }));
     }
 
-    // Find the native "Copy link" menu item in an open context menu.
+    // Find the native "Copy link" button in Jira's software-context-menu.
+    // Items are <button data-testid="...context-menu-item.context-menu-item">
+    // with the label inside a <span data-testid="...context-menu-label">.
     function findNativeCopyLinkItem() {
-        const candidates = document.querySelectorAll('[role="menuitem"]');
-        for (const el of candidates) {
-            if (el.textContent.trim() === 'Copy link') return el;
+        const buttons = document.querySelectorAll('button[data-testid*="context-menu-item"]');
+        for (const btn of buttons) {
+            const label = btn.querySelector('[data-testid$="context-menu-label"]');
+            if ((label || btn).textContent.trim() === 'Copy link') return btn;
         }
         return null;
     }
@@ -484,24 +487,34 @@
     // Inject our item right after the native "Copy link" item. Returns true once
     // the menu has been found (and our item exists), false while still waiting.
     function injectContextMenuItem(issueInfo) {
-        const anchor = findNativeCopyLinkItem();
-        if (!anchor || !anchor.parentElement) return false;
+        const anchorBtn = findNativeCopyLinkItem();
+        if (!anchorBtn) return false;
 
-        const menu = anchor.closest('[role="menu"]') || anchor.parentElement;
-        if (menu.querySelector('.' + CONTEXT_ITEM_CLASS)) return true; // already injected
+        // The clickable button lives inside an <li>; clone the whole item so the
+        // icon, padding and layout match the native entries exactly.
+        const anchorItem = anchorBtn.closest('li') || anchorBtn;
+        const list = anchorItem.parentElement;
+        if (!list) return false;
 
-        // Clone the native item so styling/markup matches exactly. The clone has no
-        // React fiber, so Jira's original "Copy link" handler will NOT fire on it.
-        const clone = anchor.cloneNode(true);
+        if (list.querySelector('.' + CONTEXT_ITEM_CLASS)) return true; // already injected
+
+        // The clone has no React fiber, so Jira's original "Copy link" handler
+        // will NOT fire on it.
+        const clone = anchorItem.cloneNode(true);
         clone.classList.add(CONTEXT_ITEM_CLASS);
         clone.removeAttribute('id');
-        clone.removeAttribute('data-testid');
         clone.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
-        clone.querySelectorAll('[data-testid]').forEach(n => n.removeAttribute('data-testid'));
 
-        relabelItem(clone, 'Copy link', contextMenuItemLabel);
+        // Relabel the visible label text.
+        const cloneLabel = clone.querySelector('[data-testid$="context-menu-label"]');
+        if (cloneLabel) {
+            cloneLabel.textContent = contextMenuItemLabel;
+        } else {
+            relabelItem(clone, 'Copy link', contextMenuItemLabel);
+        }
 
-        clone.addEventListener('click', async (e) => {
+        const cloneBtn = clone.matches('button') ? clone : (clone.querySelector('button') || clone);
+        cloneBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             e.stopPropagation();
             try {
@@ -513,7 +526,7 @@
             pressEscape();
         }, true);
 
-        anchor.parentElement.insertBefore(clone, anchor.nextSibling);
+        list.insertBefore(clone, anchorItem.nextSibling);
         console.log("🎯 Context menu item injected for", issueInfo.issueKey);
         return true;
     }

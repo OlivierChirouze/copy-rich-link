@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.7
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats. Also adds a "Copy link with title" entry to Jira's work-item right-click context menu.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -382,6 +382,7 @@
             } catch (err) {
                 console.error("❌ Clipboard error:", err);
             }
+
         };
 
         targetEl.appendChild(newBtn);
@@ -451,6 +452,12 @@
         document.dispatchEvent(new KeyboardEvent('keydown', {
             key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true
         }));
+
+        // Give Jira a moment to process the click
+        // then close the menu if it is still open.
+        setTimeout(() => {
+            document.body.click();
+        }, 0);
     }
 
     // Find the native "Copy link" button in Jira's software-context-menu.
@@ -516,15 +523,19 @@
         const cloneBtn = clone.matches('button') ? clone : (clone.querySelector('button') || clone);
         cloneBtn.addEventListener('click', async (e) => {
             e.preventDefault();
-            e.stopPropagation();
-            try {
-                await copyRichLink(issueInfo.jiraEmoji, issueInfo.issueTitle, issueInfo.shortURL);
-                console.log("✅ Rich link copied (context menu) for", issueInfo.issueKey);
-            } catch (err) {
-                console.error("❌ Clipboard error:", err);
-            }
-            pressEscape();
-        }, true);
+
+            setTimeout(async () => {
+                anchorBtn?.click();
+                try {
+                    await copyRichLink(issueInfo.jiraEmoji, issueInfo.issueTitle, issueInfo.shortURL);
+                    console.log("✅ Rich link copied (context menu) for", issueInfo.issueKey);
+                } catch (err) {
+                    console.error("❌ Clipboard error:", err);
+                }
+            }, 0)
+
+
+        }, false);
 
         list.insertBefore(clone, anchorItem.nextSibling);
         console.log("🎯 Context menu item injected for", issueInfo.issueKey);

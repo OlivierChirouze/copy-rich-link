@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats. Also adds a "Copy link with title" entry to Jira's work-item right-click context menu.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -480,12 +480,11 @@
         }, 0);
     }
 
-    // Find Jira's native "Copy link" item. Jira has used both a button with a
-    // context-menu test id and a generic [role=menuitem] across backlog/board
-    // releases, so deliberately do not depend on one element type.
+    // Find Jira's native "Copy link" item. Jira has used data-testids, generic
+    // [role=menuitem] elements, and plain buttons across backlog/board releases.
     function findNativeCopyLinkItem() {
         const menuItems = document.querySelectorAll(
-            'button[data-testid*="context-menu-item"], [role="menuitem"], [data-testid*="context-menu-item"]'
+            'button, [role="menuitem"], [data-testid*="context-menu-item"]'
         );
         for (const item of menuItems) {
             const label = item.querySelector('[data-testid$="context-menu-label"]');

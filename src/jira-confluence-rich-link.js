@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.8
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats. Also adds a "Copy link with title" entry to Jira's work-item right-click context menu.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -410,6 +410,21 @@
         return row || null;
     }
 
+    function getIssueTitleFromAccessibleName(rowEl, issueKey) {
+        // Jira's current backlog and board cards expose the title in the
+        // accessible name of their work-item button, not necessarily in a link.
+        // Example: "TRK-5852 [agent fixathon] Migrate team skills to cdt agent.\n+        // Use the enter key to load the work item".
+        const issueButton = Array.from(rowEl.querySelectorAll('button[aria-label], a[aria-label]'))
+            .find(el => el.getAttribute('aria-label')?.startsWith(issueKey + ' '));
+        if (!issueButton) return '';
+
+        return issueButton.getAttribute('aria-label')
+            .replace(new RegExp('^' + issueKey.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\s+'), '')
+            .replace(/\.?(?:\s|\n)*Use the enter key to load the work item\.?$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     // Extract { issueKey, jiraEmoji, issueTitle, shortURL } from a row, or null.
     function getIssueInfoFromRow(rowEl) {
         if (!rowEl || !rowEl.querySelectorAll) return null;
@@ -435,7 +450,12 @@
 
         if (!issueKey) return null;
 
-        if (!issueTitle) {
+        // Modern Jira cards use the browse link only for the key. Prefer the
+        // work-item button's accessible name, which includes the real summary.
+        const accessibleTitle = getIssueTitleFromAccessibleName(rowEl, issueKey);
+        if (accessibleTitle) {
+            issueTitle = accessibleTitle;
+        } else if (!issueTitle) {
             const summaryEl = rowEl.querySelector('[data-testid*="summary"]');
             if (summaryEl) issueTitle = summaryEl.textContent.trim();
         }
@@ -460,14 +480,16 @@
         }, 0);
     }
 
-    // Find the native "Copy link" button in Jira's software-context-menu.
-    // Items are <button data-testid="...context-menu-item.context-menu-item">
-    // with the label inside a <span data-testid="...context-menu-label">.
+    // Find Jira's native "Copy link" item. Jira has used both a button with a
+    // context-menu test id and a generic [role=menuitem] across backlog/board
+    // releases, so deliberately do not depend on one element type.
     function findNativeCopyLinkItem() {
-        const buttons = document.querySelectorAll('button[data-testid*="context-menu-item"]');
-        for (const btn of buttons) {
-            const label = btn.querySelector('[data-testid$="context-menu-label"]');
-            if ((label || btn).textContent.trim() === 'Copy link') return btn;
+        const menuItems = document.querySelectorAll(
+            'button[data-testid*="context-menu-item"], [role="menuitem"], [data-testid*="context-menu-item"]'
+        );
+        for (const item of menuItems) {
+            const label = item.querySelector('[data-testid$="context-menu-label"]');
+            if ((label || item).textContent.trim() === 'Copy link') return item;
         }
         return null;
     }
@@ -499,7 +521,7 @@
 
         // The clickable button lives inside an <li>; clone the whole item so the
         // icon, padding and layout match the native entries exactly.
-        const anchorItem = anchorBtn.closest('li') || anchorBtn;
+        const anchorItem = anchorBtn.closest('li, [role="menuitem"]') || anchorBtn;
         const list = anchorItem.parentElement;
         if (!list) return false;
 

@@ -1,217 +1,393 @@
 // ==UserScript==
 // @name         Gerrit Copy Rich Link with Commit Title
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  Adds icon-only button to copy rich HTML link with commit title (Gerrit change view) using short URL format, compatible with Slack/email clients that support rich text clipboard paste formats.
+// @version      1.3
+// @description  Adds an icon-only button and Ctrl+Shift+C shortcut to copy the current Gerrit change as HTML plus Markdown plain text.
 // @author       Olivier Chirouze
 // @match        https://review.*.in/*
 // @grant        none
-// @updateUrl    https://raw.githubusercontent.com/OlivierChirouze/copy-rich-link/refs/heads/main/src/gerrit-rich-link.js
+// @updateURL    https://raw.githubusercontent.com/OlivierChirouze/copy-rich-link/refs/heads/main/src/gerrit-rich-link.js
 // ==/UserScript==
 
-(
-    function () {
-        'use strict';
+(function () {
+    'use strict';
 
-        console.log(
-            "🚀 Tampermonkey Gerrit script started"
-        );
+    console.log('🚀 Tampermonkey Gerrit script started');
 
-        let observer;
-        let lastRun = 0;
-        const throttleDelay = 500;
-        const bntLabel = 'Copy rich link with commit title';
+    let observer;
+    let lastRun = 0;
+    let lastUrl = window.location.href;
+    const throttleDelay = 500;
+    const buttonId = 'copyWithTitleBtnGerrit';
+    const btnLabel = 'Copy rich HTML and Markdown link with commit title';
+    const changeDetailCache = new Map();
 
-        function getGerritInfo() {
-            let commitTitleEl = document.querySelector(
-                '.changeSubject, h2.changeSubject, h2[data-change-subject]'
-            );
-
-
-            try {
-                commitTitleEl = document.querySelector("#pg-app").shadowRoot.querySelector('#app-element').shadowRoot.querySelector("gr-change-view").shadowRoot.querySelector('.headerSubject').textContent.trim();
-            } catch {
-                console.log('not found');
-            }
-
-            if (!commitTitleEl) {
-                commitTitleEl = document.querySelector(
-                    'h2, .commit-message'
-                );
-            }
-            if (!commitTitleEl) {
-                const h2s = Array.from(document.querySelectorAll('h2'));
-                for (const h2 of h2s) {
-                    if (h2.offsetParent !== null && h2.textContent.trim().length > 0) {
-                        commitTitleEl = h2;
-                        break;
-                    }
-                }
-            }
-            if (!commitTitleEl) {
-                const candidates = Array.from(document.querySelectorAll('[class]')).filter(
-                    el => el.offsetParent !== null &&
-                        /subject|title|commit/i.test(el.className) &&
-                        el.textContent.trim().length > 0
-                );
-                if (candidates.length > 0) {
-                    commitTitleEl = candidates[0];
-                }
-            }
-            let commitTitle = commitTitleEl?.textContent?.trim() ?? "";
-            if (!commitTitle) {
-                // Fallback: use document.title
-                commitTitle = document.title.replace(/(.*) \((.*)\) · Gerrit Code Review/, "$1");
-                // Try to inject into header/nav/body
-                commitTitleEl = document.querySelector('header') || document.querySelector('nav') || document.body;
-            }
-            const commitId = document.title.replace(/(.*) \((.*)\) · Gerrit Code Review/, "$2");
-            const shortURL = window.location.href;
-            return {commitId, commitTitle, shortURL, commitTitleEl};
-        }
-
-        function tryInjectButton() {
-            const now = Date.now();
-            if (now - lastRun < throttleDelay) return;
-            lastRun = now;
-
-            // Only run on Gerrit change view
-            const isGerritChangeView = /\/c\/.+\/\+\/\d+/.test(window.location.pathname);
-            if (!isGerritChangeView) {
-                return;
-            }
-
-            const {commitId, commitTitle, shortURL, commitTitleEl} = getGerritInfo();
-            if (!commitTitleEl || !commitTitle) {
-                console.log(
-                    "⏳ Waiting for Gerrit commit title..."
-                );
-                return;
-            }
-
-            if (document.querySelector('#copyWithTitleBtnGerrit')) {
-                console.log(
-                    "✅ Button already exists (Gerrit)"
-                );
-                return;
-            }
-
-            injectButton(
-                "🚀", commitId, commitTitle, shortURL, commitTitleEl, 'copyWithTitleBtnGerrit'
-            );
-        }
-
-        function injectButton(
-            emoji, commitId, title, url, targetEl, buttonId
-        ) {
-            // this is a fake dot! to prevent Slack to convert it to a link inside the link (see https://www.onevinn.com/blog/prevent-clickable-links-with-a-fake-dot)
-            // Particularly useful for "ASP.net" string 🙄
-            const formattedTitle = title.replace(/(\w)\.(\w)/,'$1․$2');
-            const htmlLink = `<a href="${url}">${commitId} - ${formattedTitle}</a>`;
-            const plainText = `${commitId} - ${title} ${url}`;
-
-            console.log(
-                "htmlLink", htmlLink
-            );
-            console.log(
-                "plainText", plainText
-            );
-
-            const newBtn = document.createElement(
-                'button'
-            );
-            newBtn.id = buttonId;
-            newBtn.innerText = '🔗';
-            newBtn.title = bntLabel;
-            newBtn.setAttribute(
-                'aria-label', bntLabel
-            );
-            newBtn.style.marginLeft = '8px';
-            newBtn.style.cursor = 'pointer';
-            newBtn.style.background = 'none';
-            newBtn.style.border = 'none';
-            newBtn.style.padding = '0';
-            newBtn.style.fontSize = '16px';
-            newBtn.style.lineHeight = '1';
-            newBtn.style.color = '#42526E';
-            newBtn.style.transition = 'color 0.2s ease';
-
-            newBtn.onmouseenter = () => {
-                newBtn.style.color = '#0052CC';
-            };
-            newBtn.onmouseleave = () => {
-                newBtn.style.color = '#42526E';
-            };
-
-            newBtn.onclick = async () => {
-                try {
-                    await navigator.clipboard.write(
-                        [
-                            new ClipboardItem(
-                                {
-                                    'text/html': new Blob(
-                                        [htmlLink], {type: 'text/html'}
-                                    ),
-                                    'text/plain': new Blob(
-                                        [plainText], {type: 'text/plain'}
-                                    )
-                                }
-                            )
-                        ]
-                    );
-                    console.log(
-                        "✅ Rich link copied"
-                    );
-                    newBtn.innerText = emoji;
-                    setTimeout(
-                        () => newBtn.innerText = '🔗', 1500
-                    );
-                } catch (err) {
-                    console.error(
-                        "❌ Clipboard error:", err
-                    );
-                }
-            };
-
-            targetEl.appendChild(
-                newBtn
-            );
-            console.log(
-                "🎯 Button injected:", buttonId
-            );
-        }
-
-        observer = new MutationObserver(
-            () => {
-                tryInjectButton();
-            }
-        );
-
-        observer.observe(
-            document.body, {childList: true, subtree: true}
-        );
-
-        document.addEventListener(
-            'keydown', (e) => {
-                if (
-                    e.ctrlKey && e.shiftKey && e.code === 'KeyC'
-                ) {
-                    const copyLinkBtn = document.querySelector(
-                        '[aria-label="' + bntLabel + '"]'
-                    );
-                    if (copyLinkBtn) {
-                        copyLinkBtn.click();
-                        console.log(
-                            "🔗 Copy link button triggered by keyboard"
-                        );
-                    } else {
-                        console.warn(
-                            "⚠️ Copy link button not found"
-                        );
-                    }
-                }
-            }
-        );
+    function getChangeNumberFromUrl(url = window.location.href) {
+        const parsedUrl = new URL(url);
+        const match = parsedUrl.pathname.match(/\/c\/.+\/\+\/(\d+)(?:\/|$)/);
+        return match ? match[1] : '';
     }
-)();
 
+    function isGerritChangeView() {
+        return getChangeNumberFromUrl() !== '';
+    }
+
+    async function getGerritInfo() {
+        const shortURL = window.location.href;
+        const commitId = getChangeNumberFromUrl(shortURL);
+        let commitTitle = '';
+        let commitTitleEl = findCommitTitleElement();
+
+        if (commitTitleEl) {
+            commitTitle = commitTitleEl.textContent.trim();
+        }
+
+        const cachedTitle = getCachedCommitTitle(commitId);
+        if (cachedTitle) {
+            commitTitle = cachedTitle;
+        }
+
+        if (commitId && (!commitTitle || isLikelySearchTitle(commitTitle))) {
+            commitTitle = await getCommitTitleFromGerrit(commitId);
+        }
+
+        if (!commitTitle) {
+            commitTitle = getCommitTitleFromDocument();
+        }
+
+        if (!commitTitleEl) {
+            commitTitleEl = findDeep('#app-element gr-change-view') ||
+                document.querySelector('header') ||
+                document.querySelector('nav') ||
+                document.body;
+        }
+
+        return {
+            commitId,
+            commitTitle: cleanCommitTitle(commitTitle, commitId),
+            shortURL,
+            commitTitleEl
+        };
+    }
+
+    function getCachedCommitTitle(commitId) {
+        const detail = changeDetailCache.get(commitId);
+        return detail?.subject?.trim() || '';
+    }
+
+    async function getCommitTitleFromGerrit(commitId) {
+        const detail = await fetchChangeDetail(commitId).catch((err) => {
+            console.warn('⚠️ Could not fetch Gerrit change details:', err);
+            return null;
+        });
+
+        return detail?.subject?.trim() || '';
+    }
+
+    async function fetchChangeDetail(commitId) {
+        if (changeDetailCache.has(commitId)) {
+            return changeDetailCache.get(commitId);
+        }
+
+        const response = await fetch(`/changes/${encodeURIComponent(commitId)}/detail`, {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const detail = JSON.parse((await response.text()).replace(/^\)\]\}'\s*/, ''));
+        changeDetailCache.set(commitId, detail);
+        return detail;
+    }
+
+    function warmChangeDetailCache(commitId) {
+        if (commitId && !changeDetailCache.has(commitId)) {
+            fetchChangeDetail(commitId).catch((err) => {
+                console.warn('⚠️ Could not warm Gerrit change details:', err);
+            });
+        }
+    }
+
+    function findCommitTitleElement() {
+        return findDeep('.headerSubject') ||
+            findDeep('.changeSubject') ||
+            findDeep('h2.changeSubject') ||
+            findDeep('h2[data-change-subject]') ||
+            findDeep('h2') ||
+            findDeep('.commit-message') ||
+            findVisibleTitleCandidate();
+    }
+
+    function findVisibleTitleCandidate() {
+        const h2s = findAllDeep('h2');
+        for (const h2 of h2s) {
+            if (isVisible(h2) && h2.textContent.trim().length > 0) {
+                return h2;
+            }
+        }
+
+        const candidates = findAllDeep('[class]').filter(
+            (el) => isVisible(el) &&
+                /subject|title|commit/i.test(el.className) &&
+                el.textContent.trim().length > 0
+        );
+
+        return candidates[0] || null;
+    }
+
+    function getCommitTitleFromDocument() {
+        return document.title
+            .replace(/(.*) \((.*)\) · Gerrit Code Review/, '$1')
+            .replace(/\s*[·-]\s*Gerrit Code Review\s*$/i, '');
+    }
+
+    function cleanTitle(title) {
+        return String(title || '')
+            .replace(/\s*[·-]\s*Gerrit Code Review\s*$/i, '')
+            .trim();
+    }
+
+    function cleanCommitTitle(title, commitId) {
+        const cleanedTitle = cleanTitle(title);
+        if (!commitId) {
+            return cleanedTitle;
+        }
+
+        return cleanedTitle
+            .replace(new RegExp(`^${escapeRegExp(commitId)}\\s*[-–—:]\\s*`), '')
+            .trim();
+    }
+
+    function isLikelySearchTitle(title) {
+        return /\b(owner|reviewer|is|status|project|branch|topic|message|file|label):/i.test(title);
+    }
+
+    function escapeRegExp(text) {
+        return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function tryInjectButton() {
+        const now = Date.now();
+        if (now - lastRun < throttleDelay) {
+            return;
+        }
+        lastRun = now;
+
+        if (lastUrl !== window.location.href) {
+            lastUrl = window.location.href;
+            removeExistingButton();
+        }
+
+        if (!isGerritChangeView()) {
+            removeExistingButton();
+            return;
+        }
+
+        warmChangeDetailCache(getChangeNumberFromUrl());
+
+        const commitTitleEl = findCommitTitleElement() ||
+            findDeep('#app-element gr-change-view') ||
+            document.body;
+
+        if (!commitTitleEl) {
+            console.log('⏳ Waiting for Gerrit commit title...');
+            return;
+        }
+
+        if (findExistingButton()) {
+            console.log('✅ Button already exists (Gerrit)');
+            return;
+        }
+
+        injectButton('🚀', commitTitleEl);
+    }
+
+    function injectButton(emoji, targetEl) {
+        const newBtn = document.createElement('button');
+        newBtn.id = buttonId;
+        newBtn.innerText = '🔗';
+        newBtn.title = btnLabel;
+        newBtn.setAttribute('aria-label', btnLabel);
+        newBtn.style.marginLeft = '8px';
+        newBtn.style.cursor = 'pointer';
+        newBtn.style.background = 'none';
+        newBtn.style.border = 'none';
+        newBtn.style.padding = '0';
+        newBtn.style.fontSize = '16px';
+        newBtn.style.lineHeight = '1';
+        newBtn.style.color = '#42526E';
+        newBtn.style.transition = 'color 0.2s ease';
+
+        newBtn.onmouseenter = () => {
+            newBtn.style.color = '#0052CC';
+        };
+        newBtn.onmouseleave = () => {
+            newBtn.style.color = '#42526E';
+        };
+
+        newBtn.onclick = async () => {
+            await copyCurrentGerritLink(newBtn, emoji);
+        };
+
+        targetEl.appendChild(newBtn);
+        console.log('🎯 Button injected:', buttonId);
+    }
+
+    async function copyCurrentGerritLink(button, successEmoji) {
+        try {
+            const {commitId, commitTitle, shortURL} = await getGerritInfo();
+            if (!commitId || !commitTitle) {
+                console.warn('⚠️ Gerrit change title not found');
+                return;
+            }
+
+            const linkText = `${commitId} - ${commitTitle}`;
+            const htmlLink = `<a href="${escapeHtmlAttribute(shortURL)}">${escapeHtmlText(useFakeDot(linkText))}</a>`;
+            const markdownLink = `[${escapeMarkdown(linkText)}](${escapeMarkdownUrl(shortURL)})`;
+
+            console.log('htmlLink', htmlLink);
+            console.log('markdownLink', markdownLink);
+
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/html': new Blob([htmlLink], {type: 'text/html'}),
+                    'text/plain': new Blob([markdownLink], {type: 'text/plain'})
+                })
+            ]);
+
+            console.log('✅ Rich link copied');
+            flashButton(button, successEmoji);
+        } catch (err) {
+            console.error('❌ Clipboard error:', err);
+        }
+    }
+
+    function flashButton(button, emoji) {
+        if (!button) {
+            return;
+        }
+
+        button.innerText = emoji;
+        setTimeout(() => {
+            button.innerText = '🔗';
+        }, 1500);
+    }
+
+    // This is a fake dot to prevent Slack from converting part of the title to a
+    // nested link inside the copied rich link, for example in "ASP.net".
+    function useFakeDot(title) {
+        return title.replace(/(\w)\.(\w)/g, '$1․$2');
+    }
+
+    function escapeMarkdown(text) {
+        return text.replace(/([\\[\]])/g, '\\$1');
+    }
+
+    function escapeMarkdownUrl(url) {
+        return url.replace(/\)/g, '%29');
+    }
+
+    function escapeHtmlText(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function escapeHtmlAttribute(text) {
+        return escapeHtmlText(text).replace(/"/g, '&quot;');
+    }
+
+    function findExistingButton() {
+        return findDeep(`#${buttonId}`);
+    }
+
+    function removeExistingButton() {
+        const existingButton = findExistingButton();
+        if (existingButton) {
+            existingButton.remove();
+        }
+    }
+
+    function findDeep(selector, root = document) {
+        const directMatch = root.querySelector?.(selector);
+        if (directMatch) {
+            return directMatch;
+        }
+
+        for (const child of root.querySelectorAll?.('*') || []) {
+            if (child.shadowRoot) {
+                const match = findDeep(selector, child.shadowRoot);
+                if (match) {
+                    return match;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function findAllDeep(selector, root = document, matches = []) {
+        matches.push(...(root.querySelectorAll?.(selector) || []));
+
+        for (const child of root.querySelectorAll?.('*') || []) {
+            if (child.shadowRoot) {
+                findAllDeep(selector, child.shadowRoot, matches);
+            }
+        }
+
+        return matches;
+    }
+
+    function isVisible(el) {
+        return el.offsetParent !== null || el.getClientRects().length > 0;
+    }
+
+    function scheduleInjectButton() {
+        setTimeout(tryInjectButton, throttleDelay);
+    }
+
+    function patchHistoryNavigation() {
+        const originalPushState = history.pushState;
+        history.pushState = function (...args) {
+            const result = originalPushState.apply(this, args);
+            scheduleInjectButton();
+            return result;
+        };
+
+        const originalReplaceState = history.replaceState;
+        history.replaceState = function (...args) {
+            const result = originalReplaceState.apply(this, args);
+            scheduleInjectButton();
+            return result;
+        };
+
+        window.addEventListener('popstate', scheduleInjectButton);
+    }
+
+    observer = new MutationObserver(() => {
+        tryInjectButton();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+    patchHistoryNavigation();
+    tryInjectButton();
+
+    document.addEventListener('keydown', async (e) => {
+        if (e.ctrlKey && e.shiftKey && e.code === 'KeyC' && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+            const copyLinkBtn = findExistingButton();
+            await copyCurrentGerritLink(copyLinkBtn, '🚀');
+            console.log('🔗 Copy link triggered by Ctrl+Shift+C');
+        }
+    });
+})();

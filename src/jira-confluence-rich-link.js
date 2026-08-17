@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira & Confluence Copy Rich Link with Title
 // @namespace    http://tampermonkey.net/
-// @version      1.9
+// @version      1.10
 // @description  Adds icon-only button to copy rich HTML link with issue key and title (Jira main view + popup) or page title (Confluence), compatible with Slack/email clients that support rich text clipboard paste formats. Also adds a "Copy link with title" entry to Jira's work-item right-click context menu.
 // @author       Olivier Chirouze
 // @match        https://*.atlassian.net/*
@@ -22,6 +22,7 @@
     const bntLabel = 'Copy rich link with title';
     const contextMenuItemLabel = 'Copy link with title';
     const CONTEXT_ITEM_CLASS = 'copyRichLinkContextItem';
+    const issueTitleCache = new Map();
 
     // Default emoji mappings
     const defaultEmojiMappings = [
@@ -410,19 +411,109 @@
         return row || null;
     }
 
+    function escapeRegExp(text) {
+        return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function normalizeIssueTitle(rawTitle, issueKey) {
+        return String(rawTitle || '')
+            .replace(/\.?(?:\s|\n)*Use the enter key to load the work item\.?$/i, '')
+            .replace(new RegExp('^' + escapeRegExp(issueKey) + '\\s*[-:–—]?\\s*'), '')
+            .replace(new RegExp('\\s*' + escapeRegExp(issueKey) + '\\s*', 'g'), ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     function getIssueTitleFromAccessibleName(rowEl, issueKey) {
         // Jira's current backlog and board cards expose the title in the
         // accessible name of their work-item button, not necessarily in a link.
-        // Example: "TRK-5852 [agent fixathon] Migrate team skills to cdt agent.\n+        // Use the enter key to load the work item".
-        const issueButton = Array.from(rowEl.querySelectorAll('button[aria-label], a[aria-label]'))
-            .find(el => el.getAttribute('aria-label')?.startsWith(issueKey + ' '));
+        const issueButton = Array.from(rowEl.querySelectorAll('[aria-label]'))
+            .find(el => new RegExp('\\b' + escapeRegExp(issueKey) + '\\b').test(el.getAttribute('aria-label') || ''));
         if (!issueButton) return '';
 
-        return issueButton.getAttribute('aria-label')
-            .replace(new RegExp('^' + issueKey.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\s+'), '')
-            .replace(/\.?(?:\s|\n)*Use the enter key to load the work item\.?$/i, '')
-            .replace(/\s+/g, ' ')
-            .trim();
+        return normalizeIssueTitle(issueButton.getAttribute('aria-label'), issueKey);
+    }
+
+    function getIssueTitleFromSummaryElement(rowEl, issueKey) {
+        const summarySelectors = [
+            '[data-testid*="summary"]',
+            '[data-test-id*="summary"]',
+            '[aria-label*="summary" i]',
+            '[class*="summary" i]'
+        ];
+
+        for (const selector of summarySelectors) {
+            const summaryEl = rowEl.querySelector(selector);
+            const summary = normalizeIssueTitle(summaryEl?.textContent, issueKey);
+            if (summary) return summary;
+        }
+
+        return '';
+    }
+
+    function getIssueTitleFromAttributes(rowEl, issueKey) {
+        const titleAttributes = ['aria-label', 'title', 'data-tooltip'];
+        for (const el of [rowEl, ...rowEl.querySelectorAll('*')]) {
+            for (const attribute of titleAttributes) {
+                const value = el.getAttribute?.(attribute);
+                if (!value || !value.includes(issueKey)) continue;
+
+                const title = normalizeIssueTitle(value, issueKey);
+                if (title) return title;
+            }
+        }
+
+        return '';
+    }
+
+    async function fetchIssueTitle(issueKey) {
+        if (!issueKey) return '';
+        if (issueTitleCache.has(issueKey)) return issueTitleCache.get(issueKey);
+
+        const response = await fetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=summary`, {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Jira returned HTTP ${response.status}`);
+        }
+
+        const issue = await response.json();
+        const title = issue?.fields?.summary?.trim() || '';
+        issueTitleCache.set(issueKey, title);
+        return title;
+    }
+
+    function warmIssueTitle(issueInfo) {
+        if (!issueInfo?.issueKey || issueInfo.issueTitle || issueInfo.issueTitlePromise) return;
+
+        issueInfo.issueTitlePromise = fetchIssueTitle(issueInfo.issueKey)
+            .then(title => {
+                issueInfo.issueTitle = title || issueInfo.issueTitle;
+                return issueInfo.issueTitle;
+            })
+            .catch(err => {
+                console.warn("⚠️ Could not fetch Jira issue title:", err);
+                return '';
+            });
+    }
+
+    async function resolveIssueTitle(issueInfo) {
+        if (!issueInfo?.issueKey) return '';
+        if (issueInfo.issueTitle) return issueInfo.issueTitle;
+
+        if (issueInfo.issueTitlePromise) {
+            const title = await issueInfo.issueTitlePromise;
+            if (title) return title;
+        }
+
+        return fetchIssueTitle(issueInfo.issueKey).catch(err => {
+            console.warn("⚠️ Could not fetch Jira issue title:", err);
+            return '';
+        });
     }
 
     // Extract { issueKey, jiraEmoji, issueTitle, shortURL } from a row, or null.
@@ -440,7 +531,7 @@
             const best = links[0];
             const m = best.getAttribute('href').match(/\/browse\/([A-Z][A-Z0-9]+-\d+)/);
             if (m) issueKey = m[1];
-            issueTitle = best.textContent.trim();
+            if (issueKey) issueTitle = normalizeIssueTitle(best.textContent, issueKey);
         }
 
         if (!issueKey) {
@@ -456,12 +547,14 @@
         if (accessibleTitle) {
             issueTitle = accessibleTitle;
         } else if (!issueTitle) {
-            const summaryEl = rowEl.querySelector('[data-testid*="summary"]');
-            if (summaryEl) issueTitle = summaryEl.textContent.trim();
+            issueTitle = getIssueTitleFromSummaryElement(rowEl, issueKey) ||
+                getIssueTitleFromAttributes(rowEl, issueKey) ||
+                issueTitleCache.get(issueKey) ||
+                '';
         }
 
         // Strip the issue key out of the title if it leaked in, and collapse whitespace.
-        issueTitle = issueTitle.split(issueKey).join('').replace(/\s+/g, ' ').trim();
+        issueTitle = normalizeIssueTitle(issueTitle, issueKey);
 
         const jiraEmoji = getJiraEmoji(issueKey);
         const shortURL = `${window.location.origin}/browse/${issueKey}`;
@@ -548,7 +641,8 @@
             setTimeout(async () => {
                 anchorBtn?.click();
                 try {
-                    await copyRichLink(issueInfo.jiraEmoji, issueInfo.issueTitle, issueInfo.shortURL);
+                    const issueTitle = await resolveIssueTitle(issueInfo);
+                    await copyRichLink(issueInfo.jiraEmoji, issueTitle || issueInfo.issueKey, issueInfo.shortURL);
                     console.log("✅ Rich link copied (context menu) for", issueInfo.issueKey);
                 } catch (err) {
                     console.error("❌ Clipboard error:", err);
@@ -570,6 +664,7 @@
             return;
         }
         console.log("🖱️ Right-clicked Jira issue:", info.issueKey);
+        warmIssueTitle(info);
 
         // The menu renders just after the contextmenu event; poll briefly for it.
         let attempts = 0;
